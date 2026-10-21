@@ -66,9 +66,15 @@ public sealed class ProcessRunner : IProcessRunner
                 process.WaitForExit();
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
             TryKill(process);
+            if (!cancellationToken.IsCancellationRequested && timeoutCts.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"{Path.GetFileName(command.FileName)} 执行超时（等待上限 {command.Timeout!.Value.TotalSeconds:0.###} 秒）。请查看前面的步骤日志，检查远端启动或响应是否过慢。",
+                    exception);
+            }
             throw;
         }
 

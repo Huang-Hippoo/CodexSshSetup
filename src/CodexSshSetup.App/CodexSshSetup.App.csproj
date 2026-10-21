@@ -12,6 +12,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CodexSshSetup</AssemblyName>
+    <Version>0.2.0</Version>
     <RootNamespace>CodexSshSetup.App</RootNamespace>
   </PropertyGroup>
 

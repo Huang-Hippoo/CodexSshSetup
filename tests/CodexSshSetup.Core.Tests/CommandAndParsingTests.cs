@@ -17,13 +17,17 @@ public sealed class CommandAndParsingTests
         Assert.Equal("ssh.exe", command.FileName);
         Assert.Equal(new[]
         {
-            "-N", "-T",
+            "-o", "HostName=192.0.2.10", "-o", "User=researcher", "-o", "Port=22",
+            "-T",
             "-R", "127.0.0.1:17890:127.0.0.1:7890",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
             "node02"
-        }, command.Arguments);
+        }, command.Arguments.Take(command.Arguments.Count - 1));
+        Assert.Contains("exec /bin/bash --noprofile --norc", command.Arguments[^1]);
         Assert.False(command.Interactive);
     }
 
@@ -36,6 +40,19 @@ public sealed class CommandAndParsingTests
         Assert.Contains("ConnectTimeout=10", command.Arguments);
         Assert.Equal("node02", command.Arguments[^2]);
         Assert.Equal("true", command.Arguments[^1]);
+        Assert.Equal(TimeSpan.FromSeconds(60), command.Timeout);
+    }
+
+    [Fact]
+    public void Saved_endpoint_overrides_stale_ssh_config_without_losing_alias_or_input()
+    {
+        var profile = Profile with { Host = "192.0.2.20", UserName = "labuser", Port = 6115 };
+        var original = new CodexSshSetup.Core.Commands.CommandSpec("ssh.exe", [profile.Alias, "sh -s"], "script", Timeout: TimeSpan.FromSeconds(30));
+        var command = SshCommandFactory.WithConnection(original, profile);
+        Assert.Equal(new[] { "-o", "HostName=192.0.2.20", "-o", "User=labuser", "-o", "Port=6115", profile.Alias, "sh -s" }, command.Arguments);
+        Assert.Equal(original.StandardInput, command.StandardInput);
+        Assert.Equal(original.Timeout, command.Timeout);
+        Assert.Equal(17890, profile.RemoteProxyPort);
     }
 
     [Fact]

@@ -10,3 +10,12 @@ outputs/
 *.tgz
 *.log
 .worktrees/
+config.json
+connections.json
+connections.json.bak
+.env
+.env.*
+*.sqlite*
+*.lnk
+*.exe
+*.zip

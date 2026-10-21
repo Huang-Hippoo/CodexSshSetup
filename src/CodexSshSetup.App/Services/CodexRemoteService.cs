@@ -11,9 +11,10 @@ public sealed class CodexRemoteService(IProcessRunner runner)
     public async Task<LoginStatus> GetLoginStatusAsync(
         ServerProfile profile, IProgress<string>? progress, CancellationToken cancellationToken)
     {
+        progress?.Report("正在检查远端 Codex 登录状态（最多 60 秒）…");
         var command = new CommandSpec("ssh.exe",
             [profile.Alias, "$HOME/.local/bin/codex-codex-ssh-setup login status"],
-            Timeout: TimeSpan.FromSeconds(30));
+            Timeout: TimeSpan.FromSeconds(60));
         var result = await runner.RunAsync(command, progress, cancellationToken);
         var combined = result.StandardOutput + result.StandardError;
         var loggedIn = result.Success &&

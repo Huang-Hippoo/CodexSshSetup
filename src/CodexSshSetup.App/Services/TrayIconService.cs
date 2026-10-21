@@ -11,10 +11,10 @@ public sealed class TrayIconService : IDisposable
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("显示窗口", null, (_, _) => show());
-        menu.Items.Add("连接", null, (_, _) => connect());
-        menu.Items.Add("断开", null, (_, _) => disconnect());
+        menu.Items.Add("连接选中节点", null, (_, _) => connect());
+        menu.Items.Add("断开全部节点", null, (_, _) => disconnect());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("停止隧道并退出", null, (_, _) => exit());
+        menu.Items.Add("断开全部并退出", null, (_, _) => exit());
         _icon = new NotifyIcon
         {
             Text = "Codex SSH Setup",

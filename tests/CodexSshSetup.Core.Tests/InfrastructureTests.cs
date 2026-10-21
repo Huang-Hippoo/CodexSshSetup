@@ -26,6 +26,36 @@ public sealed class InfrastructureTests : IDisposable
     }
 
     [Fact]
+    public async Task Process_timeout_is_reported_as_timeout_without_command_arguments()
+    {
+        var runner = new ProcessRunner();
+        var command = new CommandSpec("cmd.exe",
+            ["/d", "/c", "ping -n 20 127.0.0.1 >nul & rem private-test-marker"],
+            Timeout: TimeSpan.FromMilliseconds(250));
+
+        var exception = await Assert.ThrowsAsync<TimeoutException>(() =>
+            runner.RunAsync(command, null, CancellationToken.None));
+
+        Assert.Contains("cmd.exe", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("超时", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-test-marker", exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ping", exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Explicit_cancellation_is_not_reported_as_timeout()
+    {
+        var runner = new ProcessRunner();
+        var command = new CommandSpec("cmd.exe",
+            ["/d", "/c", "ping -n 20 127.0.0.1 >nul"],
+            Timeout: TimeSpan.FromSeconds(10));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            runner.RunAsync(command, null, cancellation.Token));
+    }
+
+    [Fact]
     public void Interactive_process_uses_the_system_console_and_does_not_capture_password_input()
     {
         var command = new CommandSpec("ssh.exe", ["user@host", "true"], Interactive: true);

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using CodexSshSetup.App.Infrastructure;
 using CodexSshSetup.Core.Commands;
 using CodexSshSetup.Core.Models;
@@ -20,6 +21,7 @@ public interface ITunnelProcess : IAsyncDisposable
 {
     bool HasExited { get; }
     int? ExitCode { get; }
+    Task WaitForReadyAsync(CancellationToken cancellationToken);
     Task<int> WaitForExitAsync(CancellationToken cancellationToken);
     void Kill();
 }
@@ -132,28 +134,15 @@ public sealed class TunnelSupervisor : IAsyncDisposable
             {
                 process = _factory.Start(SshCommandFactory.CreateTunnel(profile, localProxyPort));
                 _ownedProcess = process;
-                await _delay(TimeSpan.FromMilliseconds(750), cancellationToken);
-                if (process.HasExited)
+                await process.WaitForReadyAsync(cancellationToken)
+                    .WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+                SetState(TunnelState.Connected);
+                started.TrySetResult();
+                var connectedAt = DateTime.UtcNow;
+                await process.WaitForExitAsync(cancellationToken);
+                if (DateTime.UtcNow - connectedAt > TimeSpan.FromSeconds(30))
                 {
-                    var exitCode = await process.WaitForExitAsync(cancellationToken);
-                    if (!started.Task.IsCompleted)
-                    {
-                        SetState(TunnelState.Failed);
-                        started.TrySetException(new InvalidOperationException(
-                            $"SSH 隧道启动后立即退出（退出码 {exitCode}）。请查看日志确认端口占用或服务端转发策略。"));
-                        return;
-                    }
-                }
-                else
-                {
-                    SetState(TunnelState.Connected);
-                    started.TrySetResult();
-                    var connectedAt = DateTime.UtcNow;
-                    await process.WaitForExitAsync(cancellationToken);
-                    if (DateTime.UtcNow - connectedAt > TimeSpan.FromSeconds(30))
-                    {
-                        attempt = 0;
-                    }
+                    attempt = 0;
                 }
 
                 if (!cancellationToken.IsCancellationRequested)
@@ -164,6 +153,7 @@ public sealed class TunnelSupervisor : IAsyncDisposable
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                started.TrySetCanceled(cancellationToken);
                 break;
             }
             catch (Exception exception)
@@ -182,7 +172,11 @@ public sealed class TunnelSupervisor : IAsyncDisposable
             finally
             {
                 if (ReferenceEquals(_ownedProcess, process)) _ownedProcess = null;
-                if (process is not null) await process.DisposeAsync();
+                if (process is not null)
+                {
+                    process.Kill();
+                    await process.DisposeAsync();
+                }
             }
         }
     }
@@ -206,20 +200,64 @@ public sealed class SystemTunnelProcessFactory(Action<string>? log = null) : ITu
     public ITunnelProcess Start(CommandSpec command)
     {
         var info = ProcessRunner.CreateStartInfo(command);
+        info.RedirectStandardInput = true;
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-        process.OutputDataReceived += (_, args) => { if (args.Data is not null) log?.Invoke(args.Data); };
-        process.ErrorDataReceived += (_, args) => { if (args.Data is not null) log?.Invoke(args.Data); };
-        if (!process.Start()) throw new InvalidOperationException("无法启动 SSH 隧道进程。");
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return new SystemTunnelProcess(process);
+        return new SystemTunnelProcess(process, log);
     }
 }
 
-public sealed class SystemTunnelProcess(Process process) : ITunnelProcess
+public sealed class SystemTunnelProcess : ITunnelProcess
 {
+    private readonly Process process;
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _heartbeatStop = new();
+    private readonly Task _heartbeat;
+
+    public SystemTunnelProcess(Process process, Action<string>? log = null)
+    {
+        this.process = process;
+        process.OutputDataReceived += (_, args) =>
+        {
+            if (args.Data == TunnelHeartbeatProtocol.Ready)
+            {
+                _ready.TrySetResult();
+                log?.Invoke("远端已确认隧道就绪；双向心跳已启用，失联后自动释放本隧道。");
+            }
+            else if (args.Data is not null && args.Data != TunnelHeartbeatProtocol.Acknowledgement)
+                log?.Invoke(args.Data);
+        };
+        process.ErrorDataReceived += (_, args) => { if (args.Data is not null) log?.Invoke(args.Data); };
+        process.Exited += (_, _) => _ready.TrySetException(new InvalidOperationException(
+            $"SSH 隧道在远端确认就绪前退出（退出码 {process.ExitCode}）。请查看端口占用或连接日志。"));
+        if (!process.Start()) throw new InvalidOperationException("无法启动 SSH 隧道进程。");
+        process.StandardInput.NewLine = "\n";
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        _heartbeat = SendHeartbeatsAsync(_heartbeatStop.Token);
+    }
+
     public bool HasExited => process.HasExited;
     public int? ExitCode => process.HasExited ? process.ExitCode : null;
+    public Task WaitForReadyAsync(CancellationToken cancellationToken) => _ready.Task.WaitAsync(cancellationToken);
+
+    private async Task SendHeartbeatsAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && !process.HasExited)
+            {
+                await process.StandardInput.WriteLineAsync(TunnelHeartbeatProtocol.Heartbeat.AsMemory(), token);
+                await process.StandardInput.FlushAsync(token);
+                await Task.Delay(TunnelHeartbeatProtocol.Interval, token);
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            _ready.TrySetException(new InvalidOperationException("SSH 隧道心跳通道已关闭。", exception));
+            Kill();
+        }
+    }
 
     public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
     {
@@ -230,18 +268,28 @@ public sealed class SystemTunnelProcess(Process process) : ITunnelProcess
 
     public void Kill()
     {
+        _heartbeatStop.Cancel();
         try
         {
+            process.StandardInput.Close();
             if (!process.HasExited) process.Kill(entireProcessTree: true);
         }
         catch (InvalidOperationException)
         {
         }
+        catch (IOException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        Kill();
+        await _heartbeat;
+        await process.WaitForExitAsync();
+        process.WaitForExit();
         process.Dispose();
-        return ValueTask.CompletedTask;
+        _heartbeatStop.Dispose();
     }
 }

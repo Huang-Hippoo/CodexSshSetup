@@ -41,26 +41,26 @@ if (-not $SkipSmoke) {
         } while (-not $smokeProcess.HasExited -and $smokeProcess.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
 
         if ($smokeProcess.HasExited) { throw "Published app exited during smoke test with code $($smokeProcess.ExitCode)." }
-        if ($smokeProcess.MainWindowHandle -eq 0 -or $smokeProcess.MainWindowTitle -ne 'Codex SSH Setup') {
+        if ($smokeProcess.MainWindowHandle -eq 0 -or -not $smokeProcess.MainWindowTitle.StartsWith('Codex SSH Setup')) {
             throw 'Published app did not create its main window.'
         }
 
         Add-Type -AssemblyName UIAutomationClient
         Add-Type -AssemblyName UIAutomationTypes
         $windowElement = [System.Windows.Automation.AutomationElement]::FromHandle($smokeProcess.MainWindowHandle)
-        $configureButton = $null
+        $connectAllButton = $null
         $descendants = $windowElement.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
         foreach ($element in $descendants) {
-            if ($element.Current.AutomationId -eq 'ConfigureButton') { $configureButton = $element; break }
+            if ($element.Current.AutomationId -eq 'ConnectAllButton') { $connectAllButton = $element; break }
         }
-        if ($null -eq $configureButton -or $configureButton.Current.IsOffscreen) {
-            throw 'Configure button is missing or off-screen.'
+        if ($null -eq $connectAllButton -or $connectAllButton.Current.IsOffscreen) {
+            throw 'Connect-all button is missing or off-screen.'
         }
         $windowBounds = $windowElement.Current.BoundingRectangle
-        $buttonBounds = $configureButton.Current.BoundingRectangle
+        $buttonBounds = $connectAllButton.Current.BoundingRectangle
         if ($buttonBounds.Left -lt $windowBounds.Left -or $buttonBounds.Right -gt $windowBounds.Right -or
             $buttonBounds.Top -lt $windowBounds.Top -or $buttonBounds.Bottom -gt $windowBounds.Bottom) {
-            throw 'Configure button is outside the main window bounds.'
+            throw 'Connect-all button is outside the main window bounds.'
         }
     }
     finally {

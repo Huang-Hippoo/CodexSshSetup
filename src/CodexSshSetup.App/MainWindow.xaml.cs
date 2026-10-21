@@ -33,7 +33,7 @@ public partial class MainWindow : Window
     {
         if (_allowClose) return;
         var choice = System.Windows.MessageBox.Show(
-            "选择“是”将隐藏到托盘并保持隧道；选择“否”将停止隧道并退出。",
+            "选择“是”将隐藏到托盘并保持所有节点连接；选择“否”将断开本程序管理的全部隧道并退出。",
             "关闭 Codex SSH Setup",
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Question);
@@ -61,6 +61,7 @@ public partial class MainWindow : Window
     {
         if (_allowClose) return;
         _allowClose = true;
+        IsEnabled = false;
         await _viewModel.StopTunnelAsync();
         await _viewModel.DisposeAsync();
         _tray?.Dispose();

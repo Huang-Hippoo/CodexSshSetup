@@ -1,11 +1,27 @@
 using CodexSshSetup.Core.Models;
 using CodexSshSetup.Core.Validation;
+using CodexSshSetup.Core.Tunnel;
 
 namespace CodexSshSetup.Core.Commands;
 
 public static class SshCommandFactory
 {
     private const string WrapperPath = "$HOME/.local/bin/codex-codex-ssh-setup";
+
+    public static CommandSpec WithConnection(CommandSpec command, ServerProfile profile)
+    {
+        Validate(profile);
+        if (!string.Equals(command.FileName, "ssh.exe", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(command.FileName, "scp.exe", StringComparison.OrdinalIgnoreCase)) return command;
+        // Keep the alias for its existing identity settings, but never let an old
+        // SSH config silently override the host/user/port displayed in the app.
+        var options = new[]
+        {
+            "-o", $"HostName={profile.Host}", "-o", $"User={profile.UserName}", "-o", $"Port={profile.Port}"
+        };
+        if (command.Arguments.Take(options.Length).SequenceEqual(options)) return command;
+        return command with { Arguments = options.Concat(command.Arguments).ToArray() };
+    }
 
     public static CommandSpec CreateKeyGeneration(string keyPath)
     {
@@ -44,22 +60,25 @@ public static class SshCommandFactory
         Validate(profile);
         return new CommandSpec("ssh.exe",
             ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", profile.Alias, "true"],
-            Timeout: TimeSpan.FromSeconds(15));
+            Timeout: TimeSpan.FromSeconds(60));
     }
 
     public static CommandSpec CreateTunnel(ServerProfile profile, int localProxyPort)
     {
         Validate(profile);
         ValidatePort(localProxyPort, nameof(localProxyPort));
-        return new CommandSpec("ssh.exe",
+        return WithConnection(new CommandSpec("ssh.exe",
         [
-            "-N", "-T",
+            "-T",
             "-R", $"127.0.0.1:{profile.RemoteProxyPort}:127.0.0.1:{localProxyPort}",
             "-o", "ExitOnForwardFailure=yes",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
-            profile.Alias
-        ]);
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            profile.Alias,
+            TunnelHeartbeatProtocol.RemoteCommand
+        ]), profile);
     }
 
     public static CommandSpec CreateRemoteCodexInstall(ServerProfile profile, string packageName)

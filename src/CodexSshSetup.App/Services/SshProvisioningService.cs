@@ -14,12 +14,21 @@ namespace CodexSshSetup.App.Services;
 public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
 {
     private static readonly HttpClient Downloads = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly SemaphoreSlim SshConfigGate = new(1, 1);
     public async Task TestPortAsync(ServerProfile profile, CancellationToken cancellationToken)
     {
         using var client = new TcpClient();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
-        await client.ConnectAsync(profile.Host, profile.Port, timeout.Token);
+        try
+        {
+            await client.ConnectAsync(profile.Host, profile.Port, timeout.Token);
+        }
+        catch (OperationCanceledException exception)
+            when (!cancellationToken.IsCancellationRequested && timeout.IsCancellationRequested)
+        {
+            throw new TimeoutException("SSH 端口连接超时（等待上限 8 秒）。请检查服务器地址、端口和网络连接。", exception);
+        }
     }
 
     public string GetKeyPath(ServerProfile profile)
@@ -64,6 +73,9 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
     public async Task UpdateSshConfigAsync(
         ServerProfile profile, string keyPath, CancellationToken cancellationToken)
     {
+        await SshConfigGate.WaitAsync(cancellationToken);
+        try
+        {
         var sshDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh");
         Directory.CreateDirectory(sshDirectory);
@@ -84,19 +96,24 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
         var tempPath = configPath + ".codex-ssh-setup.tmp";
         await File.WriteAllTextAsync(tempPath, updated, cancellationToken);
         File.Move(tempPath, configPath, overwrite: true);
+        }
+        finally { SshConfigGate.Release(); }
     }
 
     public async Task TestPasswordlessAsync(
         ServerProfile profile, IProgress<string>? progress, CancellationToken cancellationToken)
     {
+        progress?.Report("正在测试免密 SSH 登录（最多 60 秒）…");
         var result = await runner.RunAsync(
             SshCommandFactory.CreatePasswordlessTest(profile), progress, cancellationToken);
         EnsureSuccess(result, "免密 SSH 测试");
+        progress?.Report("免密 SSH 登录测试通过。");
     }
 
     public async Task<RemoteToolInfo> InspectToolsAsync(
         ServerProfile profile, IProgress<string>? progress, CancellationToken cancellationToken)
     {
+        progress?.Report("正在检测远端 Node/npm/Codex（最多 120 秒；首次启动可能较慢）…");
         const string remote = "PATH=\"$HOME/.local/codex-ssh-setup/node/bin:$HOME/.local/codex-ssh-setup/npm/bin:$HOME/.local/bin:$PATH\"; " +
             "printf 'NODE=%s\\n' \"$(node -v 2>/dev/null || echo missing)\"; " +
             "printf 'NPM=%s\\n' \"$(npm -v 2>/dev/null || echo missing)\"; " +
@@ -104,7 +121,7 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
             "printf 'CODEX_VERSION=%s\\n' \"$(codex --version 2>/dev/null || echo missing)\"; " +
             "if [ -x \"$HOME/.local/bin/codex-codex-ssh-setup\" ]; then echo WRAPPER=yes; else echo WRAPPER=no; fi";
         var result = await runner.RunAsync(
-            new CommandSpec("ssh.exe", [profile.Alias, remote], Timeout: TimeSpan.FromSeconds(30)),
+            new CommandSpec("ssh.exe", [profile.Alias, remote], Timeout: TimeSpan.FromSeconds(120)),
             progress, cancellationToken);
         EnsureSuccess(result, "检测远端工具");
         var values = result.StandardOutput

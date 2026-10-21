@@ -1,103 +1,109 @@
 # Codex SSH Setup
 
-一个 Windows 10/11 x64 图形工具，用来把 Linux SSH 主机准备为 Codex Desktop 远端主机，并让远端 Codex 通过 Windows 本地 iKuuuVPN 访问登录与 API 服务。
+Windows 10/11 x64 图形工具：保存 Linux SSH 节点、同时维护多个代理隧道，并按需准备远端 Codex 环境。
 
-## 它会做什么
+**当前版本：v0.2.0** · [下载程序](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.0) · [更新记录](CHANGELOG.md)
 
-- 测试 SSH Host/IP 与端口。
-- 创建或复用专用 ed25519 key，通过系统 OpenSSH 窗口安装公钥。
-- 只更新 Windows `~/.ssh/config` 中带有 `CODEX SSH SETUP` 标记的区块，并备份原配置。
-- 检测远端 Node、npm 与 Codex；Node 低于 20 时优先使用 conda，否则由 Windows 下载并校验官方 Node 20 Linux 包后上传到服务器。
-- 在 Windows 执行 `npm pack @openai/codex`，上传 tgz，并安装到远端用户目录。
-- 检测 `iKuuuVPNCore.exe`、PID 对应监听端口与 HTTPS CONNECT。
-- 维护 `127.0.0.1:17890` 反向 SSH 隧道，断线自动重连。
-- 检查 Codex 登录状态并运行设备登录。
-- 提供首次配置页、日常连接页、状态卡、日志与托盘菜单。
+## v0.2.0 功能
 
-## 安全边界
+- **保存多个节点**：保留 Host、账号、SSH 端口、别名和本机代理端口；自动迁移旧版当前节点，并导入本工具管理的 SSH 历史区块。
+- **多节点同时连接**：逐个连接或一键连接全部；每个节点独立显示状态、日志、取消、断开和自动重连。切换选中项不影响其他连接。
+- **自动匹配电脑代理**：验证已保存端口，并从 Windows 系统代理、代理环境变量、常见代理程序监听端口和常用端口查找可用 HTTP/mixed 代理，以实际 HTTPS CONNECT 结果为准。
+- **远端按需安装 Codex**：先建立隧道，再通过代理在当前账号下下载官方 `@openai/codex`。已有可用版本直接复用，不强制升级；缺少 Node/npm 时准备用户级运行环境。
+- **按需补齐用户代理配置**：只补齐缺失变量，已有非空配置保留并提示；修改启动文件前备份。
+- **失联自动释放隧道**：10 秒应用心跳，远端连续约 40 秒无心跳时，仅清理该隧道所属会话，降低旧端口残留阻塞重连的情况；收到远端就绪确认后才显示连接成功。
 
-- 不保存 SSH 密码、ChatGPT 密码、设备码或私钥内容。
-- 首次 SSH 密码只输入到 Windows OpenSSH 自己的窗口。
-- 不修改 Windows 系统代理。
-- 不写 Linux `/etc`、系统 Node/npm、shell profile、conda 全局配置或 Slurm 环境。
-- Node 与 Codex 安装在 `~/.local/codex-ssh-setup`。
-- Linux 代理端口只绑定 `127.0.0.1:17890`。
-- 退出时只关闭本工具持有的 SSH 进程，不按名称扫描或终止其他 SSH 会话。
+## 下载与运行
 
-专用 SSH key 默认不设口令，以支持日常无人值守重连。它只存放在当前 Windows 用户的 `.ssh` 目录，不包含在程序或源码包中。若你的安全策略要求带口令 key，请使用 ssh-agent 预加载密钥；当前 MVP 不管理 ssh-agent。
+从 [v0.2.0 Release](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.0) 下载 `CodexSshSetup-v0.2.0.exe`，或使用便携 ZIP。单文件程序已包含 .NET 运行时，普通用户无需安装 SDK；同页提供 SHA-256 校验文件。
 
-## 使用方法
+需要 Windows OpenSSH Client（`ssh.exe`、`scp.exe`、`ssh-keygen.exe`），以及一个本机可用的 HTTP/mixed 代理。不限定 iKuuu；仅 SOCKS 或需要认证的代理不在当前支持范围内。
 
-### 首次配置
+### 首次配置一个节点
 
-1. 先启动 iKuuuVPN，并确认所选节点可用。
-2. 运行 `CodexSshSetup.exe`。
-3. 填写服务器 Host/IP、SSH 用户名、端口和别名。代理端口通常是 `7890`。
-4. 点击“开始一键配置”。
-5. OpenSSH 窗口出现时，核对主机指纹并输入服务器密码。工具本身不会看到密码。
-6. 若 Login 状态显示未登录，点击“设备登录”，从内存日志区域复制网址和验证码，在浏览器完成授权。
-7. 状态就绪后，回到 Codex Desktop 的“设置 → 连接 → SSH”刷新主机。
+1. 启动电脑上的代理程序。
+2. 点击“新增节点”，填写地址、账号、SSH 端口和别名，点击“保存节点”。
+3. 已有免密 SSH 和远端环境时，可直接点击“连接此节点”。首次尚未配置公钥时，在“首次配置向导”点击“开始配置此节点”。
+4. SSH 密码仅输入系统 OpenSSH 窗口，软件不读取或保存密码。
+5. 如果尚未登录 ChatGPT，点击“设备登录”，在浏览器完成授权。登录网址和设备码只显示在内存日志，不写入磁盘。
+6. 回到 Codex Desktop 的 SSH 连接设置，刷新并选择相应主机。
 
-当前 EXE 未做商业代码签名，Windows SmartScreen 首次运行可能显示未知发布者；请核对本次交付的 SHA-256 后再选择运行。
+### 日常与多节点连接
 
-### 日常连接
+从左侧选择已保存节点，点击“连接此节点”，或点击“连接全部已保存节点”。任一节点失败不会中止其他节点的连接。已有 Codex 和代理设置不会重复安装或反复插入配置。
 
-1. 启动 iKuuuVPN。
-2. 启动本工具并点击“连接”。它不会重复安装。
-3. 需要暂时关闭窗口时选择“是”，工具会隐藏到托盘并保持隧道。
-4. 从托盘选择“停止隧道并退出”，或在关闭对话框选择“否”，才会终止本工具创建的隧道。
+“断开此节点”只影响当前节点；“断开全部节点”停止本程序管理的全部隧道。关闭窗口时可选择隐藏到托盘并保持所有连接，或断开全部并退出。
 
-## 远端文件
+连接期间锁定该节点的设置，避免修改地址后状态与实际隧道不一致；其他节点仍可操作。同一服务器的重复别名会跳过或提示端口冲突，不会强行终止外部连接。
 
-- Node：`~/.local/codex-ssh-setup/node`
-- npm global prefix：`~/.local/codex-ssh-setup/npm`
-- Codex 专用 wrapper：`~/.local/bin/codex-codex-ssh-setup`
-- 若 `~/.local/bin/codex` 原先不存在，工具会创建指向专用 wrapper 的符号链接；已有文件绝不覆盖。
+## 不同电脑如何自动匹配代理
 
-wrapper 只给 Codex 进程设置以下变量，不全局 export：
+电脑端代理端口和服务器端端口不需要相同：
 
-```text
-HTTP_PROXY=http://127.0.0.1:17890
+| 位置 | 示例 | 软件行为 |
+| --- | --- | --- |
+| 电脑 A | `127.0.0.1:7890` | 自动检测并验证 |
+| 电脑 B | `127.0.0.1:7897` | 自动检测并验证 |
+| 每个远端节点 | `127.0.0.1:17890` | SSH 转发到当前电脑实际检测到的端口 |
+
+因此服务器端可持续使用下面四个变量，无需随电脑代理端口改变：
+
+```sh
 HTTPS_PROXY=http://127.0.0.1:17890
-http_proxy=http://127.0.0.1:17890
 https_proxy=http://127.0.0.1:17890
+http_proxy=http://127.0.0.1:17890
+HTTP_PROXY=http://127.0.0.1:17890
 ```
 
-如果某个 Codex Desktop 版本允许指定远端 CLI 路径，优先选择 `~/.local/bin/codex-codex-ssh-setup`。如果它只执行 `codex`，确保远端非交互 shell 的 PATH 包含 `~/.local/bin`。MVP 不修改 shell profile，因此某些服务器需要管理员或用户自行让 SSH 非交互 shell看到该目录。
+不同服务器各有自己的回环地址，可以同时使用各自的 `17890`。界面显示实际转发关系；自动检测失败时，也可以输入电脑真实的 HTTP/mixed 端口再重试。
 
-## 常见错误
+## 修改范围与文件位置
 
-- `Connection refused`：Host/端口错误、网络不通或 sshd 未监听。
-- `Permission denied`：用户名、密码/密钥或服务器认证策略有误。
-- `remote port forwarding failed`：17890 被占用，或服务器禁止 TCP forwarding。
-- VPN 已运行但 CONNECT 失败：代理端口不对、节点不可用或代理要求认证。
-- Node 安装失败：远端没有 conda，且架构不是 x86_64/aarch64，或远端缺少支持 xz 的 `tar`。
-- Codex tgz 安装仍访问 npm：Codex 的 Linux 原生二进制是平台可选依赖；上传主 tgz 能减少下载，但当前 MVP 不是完全离线安装器。
+程序不修改系统 SSH 服务、VPN、路由、防火墙、系统代理或其他账号，不使用 sudo。
 
-## 配置和日志
+| 文件或目录 | 用途 |
+| --- | --- |
+| `%LOCALAPPDATA%\CodexSshSetup\connections.json` | 多节点设置；原子保存并保留 `.bak` |
+| `%LOCALAPPDATA%\CodexSshSetup\config.json` | 保留旧版配置，用于首次迁移 |
+| `%LOCALAPPDATA%\CodexSshSetup\logs` | 带节点前缀、经过脱敏的磁盘日志 |
+| `%USERPROFILE%\.ssh\config` | 首次配置时只更新带管理标记的 SSH 区块，并备份 |
+| `~/.local/codex-ssh-setup` | 用户级 Node/npm/Codex |
+| `~/.local/bin/codex-codex-ssh-setup` | Codex 专用代理启动器 |
+| `~/.config/codex-ssh-setup/proxy.sh` | 缺失时创建的用户代理配置 |
+| `~/.config/codex-ssh-setup/backups/` | 被修改的用户启动文件的备份 |
 
-- 配置：`%LOCALAPPDATA%\CodexSshSetup\config.json`
-- 日志：`%LOCALAPPDATA%\CodexSshSetup\logs`
-- SSH config 备份：`%USERPROFILE%\.ssh\config.codex-ssh-setup.bak`
+代理配置仅补齐当前账号缺失的变量，支持 Bash/POSIX 或 Zsh 启动文件。已有非空值保留，符号链接启动文件拒绝替换。已打开的 shell 不会被强行更改；用户启动配置在新的 shell 中生效。隧道需要电脑端程序持续运行。
 
-磁盘日志会过滤 Authorization、Bearer token、URL 查询凭证和设备码；登录网址与设备码只显示在本次运行的内存日志区域。
+共享主目录的节点可能共享用户文件，配置修改和远端安装使用文件锁，安装调度避免本应用内重复安装。远端准备过程需要 `sh`/`bash`、`flock` 等常见 Linux 工具。
 
-## 构建
+SSH 转发显式请求绑定远端 `127.0.0.1`；最终监听范围也受服务端 `GatewayPorts` 策略影响。本机回环 TCP 端口不按 Linux 用户隔离，同一节点的其他用户可能访问该端口；它不会自动接管整个服务器的网络。
 
-需要 .NET 8 SDK：
+专用 ed25519 密钥默认不设口令以支持无人值守重连，只保存在当前 Windows 用户的 `.ssh` 目录。仓库及发布包不包含密钥、真实节点配置、账号或登录令牌。若密钥设有口令，需先通过 ssh-agent 加载，软件不管理 agent。
+
+## 常见问题
+
+- **连接被拒绝或超时**：核对节点的 Host、SSH 端口、网络与服务端监听状态；不能在 SSH 尚未建立时安装远端软件。
+- **SSH 认证失败**：首次运行公钥配置向导，或检查账号、密钥和 ssh-agent。
+- **17890 转发失败**：检查重复别名、其他程序占用或服务器转发策略。本程序不抢占不属于自己的会话。
+- **自动代理检测失败**：确认代理程序已启用 HTTP/mixed 端口，且 CONNECT 可用；仅运行一个代理程序并不代表其端口可用。
+- **已有代理与隧道不同**：原值会保留并提示；Codex 专用启动器和下载进程使用本节点的隧道。
+- **反复断线**：网络或网卡切换仍可能使 SSH 中断。自动重连无法阻止底层网络中断，也不保证固定恢复时间。
+
+## 开发与构建
+
+安装 .NET 8 SDK，在 Windows PowerShell 中执行：
 
 ```powershell
+dotnet test CodexSshSetup.sln -c Release
 .\scripts\publish.ps1
 ```
 
-脚本会运行测试并生成 framework-dependent、self-contained 与 single-file 三种 `win-x64` 发布结果。推荐普通用户使用 self-contained portable ZIP 或 single-file EXE。
+发布脚本生成 framework-dependent、self-contained 与 single-file 的 `win-x64` 结果。无交互桌面的构建环境可传入 `-SkipSmoke`。
 
-## 验证范围
+自动测试覆盖节点迁移与并发保存、隧道隔离与生命周期、代理端口匹配、Codex 按需准备、错误和取消处理、SSH 参数、用户级脚本、日志脱敏等。v0.2.0 已通过 83 项测试，并完成多台节点同时转发、单节点断开隔离、隔离 HOME 中真实下载安装与重复执行验证。
 
-自动测试覆盖输入校验、SSH config 保留/替换、命令参数边界、用户级安装脚本、代理 CONNECT 判定、Node 清单与 SHA-256 选择、PID 端口解析、日志脱敏、配置原子写入、真实子进程输出和隧道归属/重连状态机。
-
-没有真实服务器账号、主机指纹和 iKuuuVPN 会话时，构建过程只能完成 Windows 启动烟雾测试。真实端到端验收应依次确认：首次密码窗口、公钥去重、免密 SSH、Node/Codex 版本、Linux `127.0.0.1:17890`、设备登录以及 Codex Desktop SSH 刷新。
+`docs/superpowers` 保留早期设计历史；当前行为以本说明和代码为准。
 
 ## 许可证
 
-本项目采用 [MIT License](LICENSE) 开源。你可以使用、修改、分发及用于商业用途，但必须保留原始版权和许可证声明。本软件按“原样”提供，不附带任何担保。
+[MIT License](LICENSE)。
