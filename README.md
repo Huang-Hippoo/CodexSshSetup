@@ -2,13 +2,13 @@
 
 Windows 10/11 x64 图形工具：保存 Linux SSH 节点、同时维护多个代理隧道，并按需准备远端 Codex 环境。
 
-**当前源码：v0.2.1** · [已发布程序：v0.2.0](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.0) · [更新记录](CHANGELOG.md)
+**当前版本：v0.2.1** · [下载程序](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.1) · [更新记录](CHANGELOG.md)
 
 ## v0.2.1：服务器重启后更换端口
 
 固定 IP 的实例更换 SSH 端口后，填写平台提供的新端口并点击连接即可。保存节点会同步 SSH 配置；连接时自动匹配同一 IP 下历史可信节点的身份密钥，避免旧端口记录冲突。新身份会显示指纹，需通过平台控制台或管理员核对后确认一次；仍保留严格的主机身份校验。
 
-新节点缺少本机公钥时会打开系统 SSH 密码窗口安装；交互式安装失败的具体错误会写入日志。新端口仍需从平台取得，不会扫描其他实例。[操作方法与限制](docs/v0.2.1-port-changes.md)。本次提交包含源码与文档，GitHub Release 程序下载仍为 v0.2.0。
+新节点缺少本机公钥时会打开系统 SSH 密码窗口安装；交互式安装失败的具体错误会写入日志。新端口仍需从平台取得，不会扫描其他实例。[操作方法与限制](docs/v0.2.1-port-changes.md)。
 
 ## v0.2.0 功能
 
@@ -21,7 +21,7 @@ Windows 10/11 x64 图形工具：保存 Linux SSH 节点、同时维护多个代
 
 ## 下载与运行
 
-从 [v0.2.0 Release](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.0) 下载 `CodexSshSetup-v0.2.0.exe`，或使用便携 ZIP。单文件程序已包含 .NET 运行时，普通用户无需安装 SDK；同页提供 SHA-256 校验文件。
+从 [v0.2.1 Release](https://github.com/Huang-Hippoo/CodexSshSetup/releases/tag/v0.2.1) 下载 `CodexSshSetup-v0.2.1.exe`，或使用便携 ZIP。单文件程序已包含 .NET 运行时，普通用户无需安装 SDK；同页提供源码包、使用说明及 SHA-256 校验文件。
 
 需要 Windows OpenSSH Client（`ssh.exe`、`scp.exe`、`ssh-keygen.exe`、`ssh-keyscan.exe`），以及一个本机可用的 HTTP/mixed 代理。不限定 iKuuu；仅 SOCKS 或需要认证的代理不在当前支持范围内。
 
