@@ -41,7 +41,7 @@ public static class SshCommandFactory
             "grep -qxF \"$key\" ~/.ssh/authorized_keys || printf '%s\\n' \"$key\" >> ~/.ssh/authorized_keys; " +
             "chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys";
         return new CommandSpec("ssh.exe",
-            ["-p", profile.Port.ToString(), $"{profile.UserName}@{profile.Host}", remoteCommand],
+            [profile.Alias, remoteCommand],
             Interactive: true, Timeout: TimeSpan.FromMinutes(5));
     }
 

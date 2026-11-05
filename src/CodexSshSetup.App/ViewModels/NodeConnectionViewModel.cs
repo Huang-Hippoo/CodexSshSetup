@@ -171,9 +171,6 @@ public sealed class NodeConnectionViewModel : BindableBase, IAsyncDisposable
             await _ssh.TestPortAsync(profile, token);
             AppendLog("SSH 端口可访问。");
             var keyPath = await _ssh.EnsureKeyAsync(profile, Progress(), token);
-            AppendLog("正在安装 SSH 公钥（最多 5 分钟）；将打开系统 OpenSSH 窗口，密码只在该窗口中输入。");
-            await _ssh.InstallPublicKeyAsync(profile, keyPath, token);
-            await _ssh.UpdateSshConfigAsync(profile, keyPath, token);
             await _ssh.TestPasswordlessAsync(profile, Progress(), token);
             SshStatus.Update(ComponentState.Ready, "免密登录正常");
 
@@ -348,12 +345,14 @@ public sealed class NodeConnectionViewModel : BindableBase, IAsyncDisposable
         return false;
     }
 
-    private Task SaveAsync(ServerProfile profile, CancellationToken token)
+    private async Task SaveAsync(ServerProfile profile, CancellationToken token)
     {
         var proxy = int.TryParse(ProxyPort, out var parsed) ? parsed : (int?)null;
         if (proxy is < 1 or > 65535 || (!string.IsNullOrWhiteSpace(ProxyPort) && proxy is null))
             throw new ArgumentException("本机代理端口必须在 1 到 65535 之间。");
-        return _save(this, new SavedConnection(profile, proxy), token);
+        await _save(this, new SavedConnection(profile, proxy), token);
+        var keyPath = _ssh.GetKeyPath(profile);
+        if (File.Exists(keyPath)) await _ssh.UpdateSshConfigAsync(profile, keyPath, token);
     }
 
     private IProgress<string> Progress() => new Progress<string>(AppendLog);

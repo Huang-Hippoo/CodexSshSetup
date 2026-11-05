@@ -49,6 +49,10 @@ public static class SshConfigManager
             .Append("  Port ").Append(profile.Port).Append(newline)
             .Append("  IdentityFile ").Append(identityValue).Append(newline)
             .Append("  IdentitiesOnly yes").Append(newline)
+            .Append("  HostKeyAlias ").Append(HostTrust.Name(profile.Host)).Append(newline)
+            .Append("  UserKnownHostsFile \"").Append(HostTrust.PinPath(normalizedIdentity)).Append('"').Append(newline)
+            .Append("  StrictHostKeyChecking yes").Append(newline)
+            .Append("  CheckHostIP no").Append(newline)
             .Append(end).Append(newline);
 
         return builder.ToString();

@@ -15,6 +15,57 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
 {
     private static readonly HttpClient Downloads = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static readonly SemaphoreSlim SshConfigGate = new(1, 1);
+    private static readonly SemaphoreSlim TrustGate = new(1, 1);
+
+    private async Task PrepareHostAsync(ServerProfile profile, string keyPath,
+        IProgress<string>? progress, CancellationToken token)
+    {
+        await TrustGate.WaitAsync(token);
+        try
+        {
+            var directory = Path.GetDirectoryName(keyPath)!;
+            var poolPath = Path.Combine(directory, "codex_ssh_setup_trusted_hosts");
+            var stableName = HostTrust.Name(profile.Host);
+            var pool = File.Exists(poolPath) ? await File.ReadAllTextAsync(poolPath, token) : "";
+            var legacyPath = Path.Combine(directory, "known_hosts");
+            var legacy = File.Exists(legacyPath) ? await File.ReadAllTextAsync(legacyPath, token) : "";
+            var trusted = HostTrust.Keys(pool, stableName, false)
+                .Concat(HostTrust.Keys(legacy, profile.Host, true)).ToHashSet(StringComparer.Ordinal);
+            var scan = await runner.RunAsync(new CommandSpec("ssh-keyscan.exe",
+                ["-T", "8", "-p", profile.Port.ToString(), "-t", "ecdsa,ed25519,rsa", profile.Host],
+                Timeout: TimeSpan.FromSeconds(35)), null, token);
+            var scanned = HostTrust.Keys(scan.StandardOutput, profile.Host, true);
+            if (scanned.Length == 0)
+                throw new InvalidOperationException("无法读取服务器身份密钥，请确认平台显示的新端口、实例状态和网络。" + scan.StandardError);
+            var selected = scanned.FirstOrDefault(trusted.Contains);
+            if (selected is null)
+            {
+                selected = scanned[0];
+                var message = $"{profile.Host}:{profile.Port} 返回了尚未信任的服务器身份。\n\n" +
+                    $"算法：{selected.Split(' ')[0]}\n指纹：{HostTrust.Fingerprint(selected)}\n\n" +
+                    "请通过平台控制台或管理员核对指纹。确认这是你的新节点后选择“是”；无法核对请选择“否”。\n" +
+                    "确认后会记住该节点，以后端口变化无需重复确认。";
+                var approved = System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    System.Windows.MessageBox.Show(message, "确认新的服务器身份",
+                        System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning,
+                        System.Windows.MessageBoxResult.No) == System.Windows.MessageBoxResult.Yes);
+                token.ThrowIfCancellationRequested();
+                if (!approved) throw new InvalidOperationException("尚未确认新服务器身份，连接已停止。");
+                trusted.Add(selected);
+            }
+            // Persist only previously trusted keys and the explicitly approved key.
+            var all = pool.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+            foreach (var key in trusted) all.Add(stableName + " " + key);
+            await File.WriteAllLinesAsync(poolPath + ".tmp", all, token);
+            File.Move(poolPath + ".tmp", poolPath, overwrite: true);
+            var pinPath = HostTrust.PinPath(keyPath);
+            await File.WriteAllTextAsync(pinPath + ".tmp", stableName + " " + selected + "\n", token);
+            File.Move(pinPath + ".tmp", pinPath, overwrite: true);
+            await UpdateSshConfigAsync(profile, keyPath, token);
+            progress?.Report($"服务器身份已核对：{HostTrust.Fingerprint(selected)}；SSH 端口已同步为 {profile.Port}。");
+        }
+        finally { TrustGate.Release(); }
+    }
     public async Task TestPortAsync(ServerProfile profile, CancellationToken cancellationToken)
     {
         using var client = new TcpClient();
@@ -65,9 +116,17 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
         ServerProfile profile, string keyPath, CancellationToken cancellationToken)
     {
         var publicKey = await File.ReadAllTextAsync(keyPath + ".pub", cancellationToken);
-        var result = await runner.RunAsync(
-            SshCommandFactory.CreateInteractiveKeyInstall(profile, publicKey), null, cancellationToken);
-        EnsureSuccess(result, "安装 SSH 公钥");
+        var errorPath = Path.Combine(Path.GetTempPath(), "codex-ssh-" + Guid.NewGuid().ToString("N") + ".log");
+        try
+        {
+            var command = SshCommandFactory.CreateInteractiveKeyInstall(profile, publicKey);
+            command = command with { Arguments = new[] { "-E", errorPath }.Concat(command.Arguments).ToArray() };
+            var result = await runner.RunAsync(command, null, cancellationToken);
+            var error = File.Exists(errorPath) ? await File.ReadAllTextAsync(errorPath, cancellationToken) : "";
+            if (!result.Success) await log.WriteAsync(error);
+            EnsureSuccess(result with { StandardError = error }, "安装 SSH 公钥");
+        }
+        finally { if (File.Exists(errorPath)) File.Delete(errorPath); }
     }
 
     public async Task UpdateSshConfigAsync(
@@ -103,9 +162,17 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
     public async Task TestPasswordlessAsync(
         ServerProfile profile, IProgress<string>? progress, CancellationToken cancellationToken)
     {
+        var keyPath = await EnsureKeyAsync(profile, progress, cancellationToken);
+        await PrepareHostAsync(profile, keyPath, progress, cancellationToken);
         progress?.Report("正在测试免密 SSH 登录（最多 60 秒）…");
         var result = await runner.RunAsync(
             SshCommandFactory.CreatePasswordlessTest(profile), progress, cancellationToken);
+        if (!result.Success && result.StandardError.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report("当前节点尚未接受本机密钥；将打开系统 SSH 窗口，请输入服务器密码以安装公钥。");
+            await InstallPublicKeyAsync(profile, keyPath, cancellationToken);
+            result = await runner.RunAsync(SshCommandFactory.CreatePasswordlessTest(profile), progress, cancellationToken);
+        }
         EnsureSuccess(result, "免密 SSH 测试");
         progress?.Report("免密 SSH 登录测试通过。");
     }
@@ -295,6 +362,9 @@ public sealed class SshProvisioningService(IProcessRunner runner, FileLog log)
 
     public static string MapError(string raw)
     {
+        if (raw.Contains("Host key verification failed", StringComparison.OrdinalIgnoreCase) ||
+            raw.Contains("REMOTE HOST IDENTIFICATION HAS CHANGED", StringComparison.OrdinalIgnoreCase))
+            return "服务器身份校验失败。请重新点击连接以核对当前节点指纹；不要删除全部 known_hosts。\n" + raw.Trim();
         if (raw.Contains("Connection refused", StringComparison.OrdinalIgnoreCase))
             return "连接被拒绝，请检查 Host、端口和 sshd。";
         if (raw.Contains("Permission denied", StringComparison.OrdinalIgnoreCase))

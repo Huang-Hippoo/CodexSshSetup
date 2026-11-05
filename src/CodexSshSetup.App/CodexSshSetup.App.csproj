@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\CodexSshSetup.Core\CodexSshSetup.Core.csproj" />
@@ -12,7 +12,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>CodexSshSetup</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <RootNamespace>CodexSshSetup.App</RootNamespace>
   </PropertyGroup>
 

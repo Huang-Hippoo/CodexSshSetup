@@ -119,7 +119,7 @@ public sealed class CommandAndParsingTests
         var command = SshCommandFactory.CreateInteractiveKeyInstall(Profile, publicKey);
 
         Assert.True(command.Interactive);
-        Assert.Equal("researcher@192.0.2.10", command.Arguments[^2]);
+        Assert.Equal("node02", command.Arguments[^2]);
         Assert.DoesNotContain(publicKey, command.Arguments[^1], StringComparison.Ordinal);
         Assert.Contains("authorized_keys", command.Arguments[^1], StringComparison.Ordinal);
         Assert.Contains("chmod 700", command.Arguments[^1], StringComparison.Ordinal);
